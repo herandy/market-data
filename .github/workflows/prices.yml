@@ -1,0 +1,74 @@
+name: Daily prices
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC on weekdays, after the US close
+  workflow_dispatch:           # adds a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download daily prices
+        run: |
+          pip install --quiet yfinance pandas
+          python - <<'EOF'
+          import io, os, time, urllib.request
+          import pandas as pd
+          import yfinance as yf
+
+          TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META"]
+          os.makedirs("data", exist_ok=True)
+
+          def from_yahoo(t):
+              df = yf.download(t, period="max", interval="1d", auto_adjust=True, progress=False, threads=False)
+              if isinstance(df.columns, pd.MultiIndex):
+                  df.columns = df.columns.get_level_values(0)
+              return df[["Open", "High", "Low", "Close", "Volume"]]
+
+          def from_stooq(t):
+              url = "https://stooq.com/q/d/l/?s=%s.us&i=d" % t.lower()
+              raw = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=30).read()
+              df = pd.read_csv(io.BytesIO(raw), parse_dates=["Date"], index_col="Date")
+              return df[["Open", "High", "Low", "Close", "Volume"]]
+
+          for t in TICKERS:
+              df = None
+              for attempt in range(3):
+                  try:
+                      df = from_yahoo(t)
+                      if len(df) > 100:
+                          break
+                  except Exception as e:
+                      print(t, "yahoo failed:", e)
+                  time.sleep(5 * (attempt + 1))
+              if df is None or len(df) <= 100:
+                  try:
+                      df = from_stooq(t)
+                      print(t, "used stooq")
+                  except Exception as e:
+                      print(t, "stooq failed:", e)
+                      continue
+              df = df.dropna()
+              df.index.name = "Date"
+              df.round(4).to_csv("data/%s.csv" % t)
+              print(t, len(df), "rows, last", df.index[-1].date())
+              time.sleep(2)
+          EOF
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || git commit -m "prices $(date -u +%Y-%m-%d)"
+          git push
