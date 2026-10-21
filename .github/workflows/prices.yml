@@ -26,7 +26,7 @@ jobs:
           import pandas as pd
           import yfinance as yf
 
-          TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META"]
+          TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "TSM", "TSLA"]
           os.makedirs("data", exist_ok=True)
 
           def from_yahoo(t):
